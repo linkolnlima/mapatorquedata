@@ -1,169 +1,250 @@
-// Variáveis globais
+// --- Variáveis Globais e Inicialização ---
 let map;
 let csvData = [];
-let markers = L.featureGroup(); // Grupo para gerenciar os marcadores
+// Usamos um L.featureGroup para gerenciar marcadores E segmentos de linha juntos,
+// facilitando a limpeza do mapa a cada nova plotagem.
+let mapLayers = L.featureGroup();
 
-// Função para inicializar o mapa
-function initMap() {
-    if (map) { // Se o mapa já existe, não crie novamente
-        map.remove();
-    }
-    map = L.map('map').setView([-19.9167, -43.9333], 10); // Coordenadas de exemplo (Belo Horizonte), zoom
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
+// Referências aos elementos do DOM para interatividade e legenda
+const csvFileInput = document.getElementById('csvFile');
+const dataColumnSelect = document.getElementById('dataColumn');
+const columnSelectorDiv = document.getElementById('columnSelector');
+const colorLegendDiv = document.getElementById('colorLegend');
+const gradientBar = document.getElementById('gradientBar');
+const minValLabel = document.getElementById('minValLabel');
+const maxValLabel = document.getElementById('maxValLabel');
 
-    markers.addTo(map); // Adiciona o grupo de marcadores ao mapa
-}
-
-// Chamar initMap quando a página carregar
+// Inicializa o mapa ao carregar a página
 document.addEventListener('DOMContentLoaded', initMap);
 
-// Obter referências aos elementos do DOM
-const csvFile = document.getElementById('csvFile');
-const dataColumnSelector = document.getElementById('dataColumn');
-const columnSelectorDiv = document.getElementById('columnSelector');
+// Função de inicialização do mapa
+function initMap() {
+    if (map) { // Evita recriar o mapa se já existir (útil em Single Page Apps)
+        map.remove();
+    }
+    // Configura o mapa com uma visão inicial sobre o Brasil (exemplo)
+    map = L.map('map').setView([-14.235, -51.9253], 4); // Centro do Brasil, zoom global
+    // Adiciona a camada de tiles do OpenStreetMap
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19
+    }).addTo(map);
 
-// Event listener para o input de arquivo
-csvFile.addEventListener('change', (event) => {
+    mapLayers.addTo(map); // Adiciona o grupo de camadas ao mapa
+}
+
+// --- Funções de Leitura e Processamento de Dados ---
+
+// Event listener para o input de arquivo CSV
+csvFileInput.addEventListener('change', async (event) => {
     const file = event.target.files[0];
-    if (file) {
-        // Usar Papa Parse para ler o CSV
-        Papa.parse(file, {
-            header: true, // Assumir que a primeira linha é o cabeçalho
-            dynamicTyping: true, // Tentar converter strings para números/booleanos
-            skipEmptyLines: true,
-            complete: function(results) {
-                csvData = results.data;
-                console.log('Dados CSV carregados:', csvData);
-                populateColumnSelector(results.meta.fields);
-                columnSelectorDiv.style.display = 'block'; // Mostrar o seletor de coluna
-                plotDataOnMap(); // Plotar os dados iniciais
-            },
-            error: function(error) {
-                console.error('Erro ao ler o CSV:', error);
-                alert('Erro ao ler o arquivo CSV. Verifique o formato.');
-            }
-        });
+    if (!file) {
+        console.warn('Nenhum arquivo selecionado.');
+        return;
+    }
+
+    try {
+        const results = await parseCSVFile(file);
+        csvData = results.data;
+        console.log('Dados CSV carregados e processados:', csvData);
+        populateDataColumnSelector(results.meta.fields);
+        columnSelectorDiv.style.display = 'flex'; // Exibe o seletor de coluna
+        plotDataOnMap(); // Plota os dados iniciais com a primeira opção (nenhum)
+    } catch (error) {
+        console.error('Erro ao processar o arquivo CSV:', error);
+        alert('Erro ao ler o arquivo CSV. Verifique o formato e o console para mais detalhes.');
     }
 });
 
-// Preencher o seletor de coluna com base nos cabeçalhos do CSV
-function populateColumnSelector(headers) {
-    dataColumnSelector.innerHTML = ''; // Limpar opções existentes
-    const commonCoords = ['latitude', 'longitude', 'lat', 'lon', 'x', 'y']; // Colunas a ignorar ou priorizar
+// Wrapper para Papa Parse com Promise (para usar async/await)
+function parseCSVFile(file) {
+    return new Promise((resolve, reject) => {
+        Papa.parse(file, {
+            header: true,         // Assumir que a primeira linha é o cabeçalho
+            dynamicTyping: true,  // Tentar converter strings para números/booleanos
+            skipEmptyLines: true, // Ignorar linhas em branco
+            complete: (results) => resolve(results),
+            error: (error) => reject(error)
+        });
+    });
+}
 
-    // Adiciona uma opção para "Nenhum" ou "Somente Localização"
+// Preenche o seletor de coluna com base nos cabeçalhos do CSV
+function populateDataColumnSelector(headers) {
+    dataColumnSelect.innerHTML = ''; // Limpa opções existentes
+    // Colunas de coordenadas comuns a serem ignoradas no seletor de dados
+    const commonCoordNames = [' Latitude', ' Longitude', 'lat', 'lon', 'x', 'y'];
+
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
-    defaultOption.textContent = 'Selecionar Dado...';
-    dataColumnSelector.appendChild(defaultOption);
+    defaultOption.textContent = '--- Selecionar Dado para Cor ---';
+    dataColumnSelect.appendChild(defaultOption);
 
     headers.forEach(header => {
-        // Ignorar colunas de coordenada ao preencher o seletor de dados
-        if (!commonCoords.includes(header.toLowerCase())) {
+        // Filtra colunas que são provavelmente coordenadas
+        if (!commonCoordNames.includes(header.toLowerCase()) && header) { // header && para evitar strings vazias
             const option = document.createElement('option');
             option.value = header;
             option.textContent = header;
-            dataColumnSelector.appendChild(option);
+            dataColumnSelect.appendChild(option);
         }
     });
 }
 
 // Event listener para a seleção de coluna de dados
-dataColumnSelector.addEventListener('change', plotDataOnMap);
+dataColumnSelect.addEventListener('change', plotDataOnMap);
 
-// Função para plotar os dados no mapa
+// --- Funções de Visualização no Mapa ---
+
+/**
+ * Calcula a cor HSL para um valor dado, dentro de um espectro definido pelos valores mínimo e máximo.
+ * O espectro vai de azul (hue 240) para vermelho (hue 0).
+ * @param {number} value - O valor a ser mapeado para uma cor.
+ * @param {number} min - O valor mínimo do espectro.
+ * @param {number} max - O valor máximo do espectro.
+ * @returns {string} - Uma string de cor HSL.
+ */
+function getColorForValue(value, min, max) {
+    if (min === max) {
+        return 'hsl(120, 100%, 50%)'; // Verde para valores constantes
+    }
+    // Normaliza o valor para uma escala de 0 a 1
+    const normalized = (value - min) / (max - min);
+    // Interpola o hue de azul (240) para vermelho (0)
+    const hue = 240 - (normalized * 240);
+    return `hsl(${hue}, 100%, 50%)`; // Saturação e luminosidade constantes
+}
+
+/**
+ * Atualiza a legenda de cores no DOM.
+ * @param {number} minVal - Valor mínimo do dado.
+ * @param {number} maxVal - Valor máximo do dado.
+ */
+function updateColorLegend(minVal, maxVal) {
+    if (minVal === Infinity || maxVal === -Infinity) { // Nenhum dado numérico válido
+        colorLegendDiv.style.display = 'none';
+        return;
+    }
+    colorLegendDiv.style.display = 'block';
+    minValLabel.textContent = `Min: ${minVal.toFixed(2)}`;
+    maxValLabel.textContent = `Max: ${maxVal.toFixed(2)}`;
+
+    // Cria um gradiente CSS para a barra da legenda
+    const gradientCss = `linear-gradient(to right, ${getColorForValue(minVal, minVal, maxVal)}, ${getColorForValue(maxVal, minVal, maxVal)})`;
+    gradientBar.style.background = gradientCss;
+}
+
+
+// Função principal para plotar os dados no mapa
 function plotDataOnMap() {
-    markers.clearLayers(); // Limpa todos os marcadores e linhas existentes
+    mapLayers.clearLayers(); // Limpa todos os marcadores e linhas existentes do grupo
 
-    const selectedColumn = dataColumnSelector.value;
-    const minLat = -90;
-    const maxLat = 90;
-    const minLon = -180;
-    const maxLon = 180;
+    const selectedColumn = dataColumnSelect.value;
 
-    let validPointsCount = 0;
+    let validPointsData = []; // Armazena pontos válidos com seus dados originais
     let bounds = []; // Para ajustar o zoom do mapa
-    let polylineCoordinates = []; // NOVO: Array para armazenar as coordenadas da linha
+    
+    // --- Etapa 1: Filtrar pontos válidos e determinar min/max para a coluna selecionada ---
+    let minValue = Infinity;
+    let maxValue = -Infinity;
+    let hasNumericalSelectedData = false;
 
     csvData.forEach(row => {
         // Tentar identificar as colunas de latitude e longitude (insensível a maiúsculas/minúsculas)
-        const latKeys = [' Latitude', 'lat', 'y'];
-        const lonKeys = [' Longitude', 'lon', 'x'];
-
         let latitude = null;
         let longitude = null;
 
-        for (const key of latKeys) {
-            if (row.hasOwnProperty(key) && typeof row[key] === 'number') {
+        let key =' Latitude';
+        if (row.hasOwnProperty(key) && typeof row[key] === 'number' && row[key] >= -90 && row[key] <= 90) {
                 latitude = row[key];
-                break;
-            }
         }
-        for (const key of lonKeys) {
-            if (row.hasOwnProperty(key) && typeof row[key] === 'number') {
-                longitude = row[key];
-                break;
-            }
+        key =' Longitude';
+        
+        if (row.hasOwnProperty(key) && typeof row[key] === 'number' && row[key] >= -180 && row[key] <= 180) {
+            longitude = row[key];
         }
         
-        // Validação básica das coordenadas
-        if (latitude !== null && longitude !== null && 
-            latitude >= minLat && latitude <= maxLat && 
-            longitude >= minLon && longitude <= maxLon) {
-            
-            validPointsCount++;
-            const latLng = [latitude, longitude];
-            bounds.push(latLng); // Adiciona para calcular o fitBounds
-            polylineCoordinates.push(latLng); // NOVO: Adiciona a coordenada à lista para a linha
+        
+        if (latitude !== null && longitude !== null) {
+            validPointsData.push({
+                latLng: [latitude, longitude],
+                rowData: row // Mantém o acesso aos dados da linha original
+            });
+            bounds.push([latitude, longitude]);
 
-            let popupContent = `<b>Coordenadas:</b> ${latitude.toFixed(4)}, ${longitude.toFixed(4)}<br>`;
-            let markerOptions = { color: 'blue', radius: 8 }; // Opções padrão
-
-            if (selectedColumn && row[selectedColumn] !== undefined && row[selectedColumn] !== null) {
+            // Se uma coluna de dado foi selecionada e é numérica, atualiza min/max
+            if (selectedColumn && row.hasOwnProperty(selectedColumn) && typeof row[selectedColumn] === 'number') {
                 const dataValue = row[selectedColumn];
-                popupContent += `<b>${selectedColumn}:</b> ${dataValue}<br>`;
-
-                // Exemplo de como colorir/dimensionar o marcador com base no valor da coluna
-                if (typeof dataValue === 'number') {
-                    const colorIntensity = Math.min(1, Math.max(0, dataValue / 100)); // Supondo valor máximo de 100
-                    markerOptions.color = `hsl(${240 - (colorIntensity * 240)}, 100%, 50%)`;
-                    markerOptions.radius = 5 + (colorIntensity * 10);
-                } else {
-                    markerOptions.color = 'green';
-                }
-            } else {
-                popupContent += `<i>Nenhum dado selecionado ou valor ausente para a coluna.</i>`;
+                minValue = Math.min(minValue, dataValue);
+                maxValue = Math.max(maxValue, dataValue);
+                hasNumericalSelectedData = true;
             }
-
-            // Criar e adicionar o marcador
-            const marker = L.circleMarker(latLng, markerOptions)
-                .bindPopup(popupContent);
-            
-            markers.addLayer(marker); // Adiciona ao grupo de marcadores
-        } else {
-            // console.warn('Ponto inválido ou sem coordenadas:', row);
         }
     });
 
-    // NOVO: Desenhar a linha após processar todos os pontos
-    if (polylineCoordinates.length >= 2) { // Uma linha requer pelo menos 2 pontos
-        const polyline = L.polyline(polylineCoordinates, {
-            color: 'red',        // Cor da linha
-            weight: 3,           // Espessura da linha
-            opacity: 0.7         // Opacidade da linha
-        });
-        markers.addLayer(polyline); // Adiciona a linha ao grupo de marcadores
+    // Ajusta min/max se não houver dados numéricos para a coluna selecionada
+    if (!hasNumericalSelectedData || minValue === Infinity) {
+        minValue = 0; // Fallback para evitar erros na escala
+        maxValue = 1;
+        updateColorLegend(Infinity, -Infinity); // Esconde a legenda
+    } else {
+        updateColorLegend(minValue, maxValue); // Atualiza a legenda
     }
 
-    if (validPointsCount > 0 && map) {
-        // Ajusta o zoom e a centralização do mapa para mostrar todos os marcadores e a linha
+    // --- Etapa 2: Desenhar Marcadores e Segmentos de Linha ---
+    validPointsData.forEach((pointData, index) => {
+        const latLng = pointData.latLng;
+        const row = pointData.rowData;
+
+        let popupContent = `<b>Coordenadas:</b> ${latLng[0].toFixed(4)}, ${latLng[1].toFixed(4)}<br>`;
+        let markerColor = 'blue'; // Cor padrão do marcador
+        let markerRadius = 8; // Raio padrão do marcador
+
+        // Se a coluna de dados foi selecionada e possui valor, personalize o marcador
+        if (selectedColumn && row.hasOwnProperty(selectedColumn) && row[selectedColumn] !== undefined && row[selectedColumn] !== null) {
+            const dataValue = row[selectedColumn];
+            popupContent += `<b>${selectedColumn}:</b> ${dataValue}<br>`;
+
+            if (typeof dataValue === 'number') {
+                markerColor = getColorForValue(dataValue, minValue, maxValue); // Cor do marcador baseada no seu próprio valor
+                // Escala o raio do marcador (ex: de 5 a 10px)
+                markerRadius = 5 + ((dataValue - minValue) / (maxValue - minValue) * 5); 
+            } else {
+                markerColor = 'purple'; // Cor diferente para dados não numéricos
+            }
+        } else {
+            popupContent += `<i>Nenhum dado para a coluna selecionada ou valor ausente.</i>`;
+        }
+
+        const marker = L.circleMarker(latLng, { color: markerColor, radius: markerRadius })
+            .bindPopup(popupContent);
+        mapLayers.addLayer(marker);
+
+        // Desenha um segmento de linha do ponto atual para o próximo ponto
+        if (index < validPointsData.length - 1) {
+            const nextLatLng = validPointsData[index + 1].latLng;
+            const segmentPoints = [latLng, nextLatLng];
+
+            // A cor do segmento é baseada no valor do ponto *inicial* do segmento
+            let segmentColor = 'gray'; // Cor padrão da linha se não houver dado numérico
+            if (selectedColumn && row.hasOwnProperty(selectedColumn) && typeof row[selectedColumn] === 'number') {
+                segmentColor = getColorForValue(row[selectedColumn], minValue, maxValue);
+            }
+
+            const polylineSegment = L.polyline(segmentPoints, {
+                color: segmentColor,
+                weight: 4,
+                opacity: 0.8,
+                lineCap: 'round' // Aparência mais suave das junções
+            });
+            mapLayers.addLayer(polylineSegment);
+        }
+    });
+
+    // Ajusta o zoom do mapa para incluir todos os pontos válidos
+    if (validPointsData.length > 0 && map) {
         map.fitBounds(bounds, { padding: [50, 50] }); 
     } else if (map && csvData.length > 0) {
-         console.warn('Nenhum ponto válido encontrado no CSV para plotar.');
+         console.warn('Nenhum ponto válido com coordenadas encontradas no CSV para plotar.');
     }
 }
-
-// Nota: Para este exemplo funcionar, o seu CSV deve ter colunas como "latitude" e "longitude" (ou variações como "lat", "lon", "y", "x")
-// e outras colunas com dados que você deseja visualizar.
