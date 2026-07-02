@@ -106,14 +106,18 @@ function getColorForValue(value, min, max) {
     return `hsl(${hue}, 100%, 50%)`;
 }
 
-function updateColorLegend(minVal, maxVal) {
+function updateColorLegend(minVal, maxVal, isConverted = false) {
     if (minVal === Infinity || maxVal === -Infinity || !currentHasNumericalSelectedData) {
         colorLegendDiv.style.display = 'none';
         return;
     }
     colorLegendDiv.style.display = 'block';
-    minValLabel.textContent = `Min: ${minVal.toFixed(2)}`;
-    maxValLabel.textContent = `Max: ${maxVal.toFixed(2)}`;
+    
+    const unit = isConverted ? '°C' : '';
+    const title = isConverted ? 'Legenda da Cor (ºC)' : 'Legenda da Cor';
+    document.querySelector('#colorLegend h4').textContent = title;
+    minValLabel.textContent = `Min: ${minVal.toFixed(2)}${unit}`;
+    maxValLabel.textContent = `Max: ${maxVal.toFixed(2)}${unit}`;
 
     const gradientCss = `linear-gradient(to right, ${getColorForValue(minVal, minVal, maxVal)}, ${getColorForValue(maxVal, minVal, maxVal)})`;
     gradientBar.style.background = gradientCss;
@@ -135,16 +139,28 @@ function plotDataOnMap() {
     polylineFeatureGroup = null;
 
     const selectedColumn = dataColumnSelect.value;
-   
+    const needsConversion = selectedColumn.includes('°F');
+
+    // Cria uma cópia dos dados para não modificar o original. Converte se necessário.
+    const processedData = csvData.map(row => {
+        if (needsConversion && row.hasOwnProperty(selectedColumn) && typeof row[selectedColumn] === 'number') {
+            const newRow = { ...row };
+            const fahrenheit = newRow[selectedColumn];
+            newRow[selectedColumn] = (fahrenheit - 32) * 5 / 9; // Conversão F -> C
+            return newRow;
+        }
+        return row;
+    });
 
     let validPointsData = [];
     let bounds = [];
-    
+
     let minValue = Infinity;
     let maxValue = -Infinity;
     let hasNumericalSelectedDataForPlot = false;
 
-    csvData.forEach(row => {
+    // Usa os dados processados (processedData) para encontrar pontos válidos e calcular min/max
+    processedData.forEach((row, index) => {
         let latitude = null;
         let longitude = null;
 
@@ -161,7 +177,7 @@ function plotDataOnMap() {
         if (latitude !== null && longitude !== null) {
             validPointsData.push({
                 latLng: [latitude, longitude],
-                rowData: row
+                rowData: row // rowData agora contém o valor convertido, se aplicável
             });
             bounds.push([latitude, longitude]);
 
@@ -180,7 +196,7 @@ function plotDataOnMap() {
     currentSelectedColumn = selectedColumn;
     currentHasNumericalSelectedData = hasNumericalSelectedDataForPlot;
 
-    updateColorLegend(currentMinValue, currentMaxValue);
+    updateColorLegend(currentMinValue, currentMaxValue, needsConversion);
 
     // 3. Re-inicializa o markerClusterGroup com a função de ícone personalizada
     markerClusterGroup = L.markerClusterGroup({
@@ -238,13 +254,19 @@ function plotDataOnMap() {
         let markerColor = 'blue';
         let markerRadius = 8;
 
-        if (selectedColumn && row.hasOwnProperty(selectedColumn) && row[selectedColumn] !== undefined && row[selectedColumn] !== null) {
-            const dataValue = row[selectedColumn];
-            popupContent += `<b>${selectedColumn}:</b> ${dataValue}<br>`;
+        const hasSelectedData = selectedColumn && row.hasOwnProperty(selectedColumn) && row[selectedColumn] !== undefined && row[selectedColumn] !== null;
 
-            if (typeof dataValue === 'number') {
+        if (hasSelectedData) {
+            const dataValue = row[selectedColumn]; // Pega o valor (convertido ou não) da linha atual
+            if (needsConversion) {
+                popupContent += `<b>${selectedColumn.replace('ºF', 'ºC')}:</b> ${dataValue.toFixed(2)}<br>`;
+            } else {
+                popupContent += `<b>${selectedColumn}:</b> ${dataValue}<br>`;
+            }
+
+            if (currentHasNumericalSelectedData && typeof dataValue === 'number') {
                 markerColor = getColorForValue(dataValue, currentMinValue, currentMaxValue); 
-                markerRadius = 5 + ((dataValue - currentMinValue) / (currentMaxValue - currentMinValue) * 5); 
+                markerRadius = 5 + (((dataValue - currentMinValue) / (currentMaxValue - currentMinValue)) * 5); 
             } else {
                 markerColor = 'purple';
             }
@@ -255,7 +277,7 @@ function plotDataOnMap() {
         const marker = L.circleMarker(latLng, {
             color: markerColor,
             radius: markerRadius,
-            rowData: row
+            rowData: row // Passa a linha com o dado já processado
         }).bindPopup(popupContent);
         markerClusterGroup.addLayer(marker);
 
@@ -264,8 +286,9 @@ function plotDataOnMap() {
             const segmentPoints = [latLng, nextLatLng];
 
             let segmentColor = 'gray';
-            if (selectedColumn && row.hasOwnProperty(selectedColumn) && typeof row[selectedColumn] === 'number') {
-                segmentColor = getColorForValue(row[selectedColumn], currentMinValue, currentMaxValue);
+            if (hasSelectedData && currentHasNumericalSelectedData) {
+                const dataValue = row[selectedColumn];
+                segmentColor = getColorForValue(dataValue, currentMinValue, currentMaxValue);
             }
 
             const polylineSegment = L.polyline(segmentPoints, {

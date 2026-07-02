@@ -67,3 +67,31 @@ select {
     font-size: 0.9em;
     color: #555;
 }
+
+.footer {
+    margin-top: 30px;
+    padding: 20px;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+.footer h2 {
+    color: #0056b3;
+    margin-bottom: 15px;
+}
+
+.chart-container {
+    position: relative;
+    width: 80%; /* Largura do gráfico, ajuste conforme necessário */
+    max-width: 800px; /* Largura máxima */
+    height: 300px; /* Altura do gráfico */
+    margin: 0 auto; /* Centraliza */
+}
+
+/* Garante que o canvas não seja muito pequeno/grande */
+canvas {
+    max-width: 100%;
+    height: auto;
+}
