@@ -10,18 +10,24 @@ let currentMaxValue = -Infinity;
 let currentSelectedColumn = '';
 let currentHasNumericalSelectedData = false;
 
-// NOVO: Variável global para a instância do Chart.js
+// Variável global para a instância do Chart.js
 let dataChartInstance = null;
+
+// Array de marcadores indexados pela linha do CSV (para sincronização gráfico → mapa)
+let markersIndex = [];
+
+// Marcador de destaque temporário
+let highlightMarker = null;
 
 // Referências aos elementos do DOM para interatividade e legenda
 const csvFileInput = document.getElementById('csvFile');
-const dataColumnSelect = document.getElementById('dataColumn');
+const mapDataColumnSelect = document.getElementById('mapDataColumn');
 const columnSelectorDiv = document.getElementById('columnSelector');
 const colorLegendDiv = document.getElementById('colorLegend');
 const gradientBar = document.getElementById('gradientBar');
 const minValLabel = document.getElementById('minValLabel');
 const maxValLabel = document.getElementById('maxValLabel');
-// NOVO: Referências para o canvas e mensagem do gráfico
+// Referências para o canvas e mensagem do gráfico
 const dataChartCanvas = document.getElementById('dataChart');
 const chartMessage = document.getElementById('chartMessage');
 
@@ -75,25 +81,25 @@ function parseCSVFile(file) {
 }
 
 function populateDataColumnSelector(headers) {
-    dataColumnSelect.innerHTML = '';
+    mapDataColumnSelect.innerHTML = '';
     const commonCoordNames = ['latitude', 'longitude', 'lat', 'lon', 'x', 'y'];
 
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
     defaultOption.textContent = '--- Selecionar Dado para Cor ---';
-    dataColumnSelect.appendChild(defaultOption);
+    mapDataColumnSelect.appendChild(defaultOption);
 
     headers.forEach(header => {
         if (!commonCoordNames.includes(header.toLowerCase()) && header) {
             const option = document.createElement('option');
             option.value = header;
             option.textContent = header;
-            dataColumnSelect.appendChild(option);
+            mapDataColumnSelect.appendChild(option);
         }
     });
 }
 
-dataColumnSelect.addEventListener('change', plotDataOnMap);
+mapDataColumnSelect.addEventListener('change', plotDataOnMap);
 
 // --- Funções de Visualização no Mapa (sem alterações nas funções auxiliares) ---
 
@@ -123,188 +129,346 @@ function updateColorLegend(minVal, maxVal, isConverted = false) {
     gradientBar.style.background = gradientCss;
 }
 
+// --- Funções para o Gráfico de Linhas ---
 
+/**
+ * Atualiza ou cria o gráfico de linhas com os dados do CSV.
+ */
+function updateDataChart() {
+    if (dataChartInstance) {
+        dataChartInstance.destroy();
+        dataChartInstance = null;
+    }
 
-// --- Função principal para plotar os dados no mapa (e chamar o gráfico) ---
-function plotDataOnMap() {
-    // 1. Limpa e remove camadas existentes do mapa
+    if (csvData.length === 0) {
+        chartMessage.textContent = 'Carregue um arquivo CSV para visualizar o gráfico de dados.';
+        chartMessage.style.display = 'block';
+        dataChartCanvas.style.display = 'none';
+        return;
+    }
+
+    const headers = Object.keys(csvData[0]);
+    const commonCoordNames = ['latitude', 'longitude', 'lat', 'lon', 'x', 'y'];
+    const timeKeys = ['timestamp', 'date', 'time', 'datetime'];
+
+    // Tenta encontrar uma coluna de tempo para o eixo X
+    let timeColumn = headers.find(h => timeKeys.includes(h.toLowerCase()));
+    const labels = csvData.map((row, index) => {
+        if (timeColumn) {
+            // Tenta usar Luxon para formatar datas, se possível
+            const dt = luxon.DateTime.fromISO(row[timeColumn]) || luxon.DateTime.fromRFC2822(row[timeColumn]);
+            if (dt.isValid) {
+                return dt.toLocaleString(luxon.DateTime.DATETIME_SHORT);
+            }
+            return row[timeColumn]; // Fallback para o valor original
+        }
+        return `Ponto ${index + 1}`;
+    });
+
+    const datasets = headers
+        .filter(header => {
+            // Filtra para incluir apenas colunas numéricas que não são coordenadas
+            const isCoord = commonCoordNames.includes(header.toLowerCase());
+            const hasNumericData = csvData.some(row => typeof row[header] === 'number');
+            return header && !isCoord && hasNumericData;
+        })
+        .map((header, index) => {
+            const needsConversion = header.includes('°F');
+            const data = csvData.map(row => {
+                const value = row[header];
+                if (needsConversion && typeof value === 'number') {
+                    return (value - 32) * 5 / 9; // Converte F -> C
+                }
+                return value;
+            });
+
+            const color = `hsl(${(index * 60) % 360}, 70%, 50%)`;
+
+            // Visível apenas se for a coluna selecionada no combobox do mapa
+            const selectedColumn = mapDataColumnSelect.value;
+            const isSelected = header === selectedColumn ||
+                (needsConversion && header.replace('°F', '°C') === selectedColumn);
+
+            return {
+                label: needsConversion ? header.replace('°F', '°C') : header,
+                data: data,
+                borderColor: color,
+                backgroundColor: color + '33', // Cor com transparência
+                fill: false,
+                tension: 0.1,
+                hidden: !isSelected,
+                pointRadius: data.length > 500 ? 0 : 3, // Sem pontos em datasets grandes
+                yAxisID: needsConversion ? 'y_temp' : 'y_default' // Associa ao eixo Y correto
+            };
+        });
+
+    if (datasets.length === 0) {
+        chartMessage.textContent = 'Nenhuma coluna com dados numéricos (além de coordenadas) foi encontrada para plotar no gráfico.';
+        chartMessage.style.display = 'block';
+        dataChartCanvas.style.display = 'none';
+        return;
+    }
+
+    // Mostra o gráfico e esconde a mensagem
+    chartMessage.style.display = 'none';
+    dataChartCanvas.style.display = 'block';
+
+    // Cria o objeto de escalas dinamicamente
+    const scales = {
+        y_default: { type: 'linear', position: 'left', title: { display: true, text: 'Valores' } }
+    };
+
+    // Verifica se algum dataset usa o eixo de temperatura e o adiciona se necessário
+    const hasTempData = datasets.some(ds => ds.yAxisID === 'y_temp');
+    if (hasTempData) {
+        scales.y_temp = { 
+            type: 'linear', 
+            position: 'right', 
+            title: { display: true, text: 'Temperatura (°C)' }, 
+            grid: { drawOnChartArea: false } 
+        };
+    }
+
+    const ctx = dataChartCanvas.getContext('2d');
+    dataChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            normalized: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: scales,
+            plugins: {
+                title: { display: true, text: 'Visualização dos Indicadores' },
+                decimation: { enabled: true, algorithm: 'lttb', samples: 500, threshold: 1000 }
+            },
+            onClick: (event, elements) => {
+                if (!elements || elements.length === 0) return;
+                const dataIndex = elements[0].index;
+                highlightMapMarker(dataIndex);
+            }
+        }
+    });
+}
+
+/**
+ * Destaca no mapa o marcador correspondente ao índice clicado no gráfico.
+ * Expande o cluster se necessário, centraliza o mapa e abre o popup.
+ * @param {number} dataIndex - Índice do ponto clicado no gráfico (= linha do CSV).
+ */
+function highlightMapMarker(dataIndex) {
+    if (!markerClusterGroup || dataIndex < 0 || dataIndex >= markersIndex.length) return;
+
+    const marker = markersIndex[dataIndex];
+    if (!marker) return;
+
+    // Remove destaque anterior
+    if (highlightMarker && map.hasLayer(highlightMarker)) {
+        map.removeLayer(highlightMarker);
+        highlightMarker = null;
+    }
+
+    // Adiciona um círculo de destaque pulsante na posição do marcador
+    const latLng = marker.getLatLng();
+    highlightMarker = L.circleMarker(latLng, {
+        radius: 18,
+        color: '#ff4444',
+        weight: 3,
+        fillColor: '#ff4444',
+        fillOpacity: 0.25
+    }).addTo(map);
+
+    // Remove o destaque após 4 segundos
+    setTimeout(() => {
+        if (highlightMarker && map.hasLayer(highlightMarker)) {
+            map.removeLayer(highlightMarker);
+            highlightMarker = null;
+        }
+    }, 4000);
+
+    // Expande o cluster para revelar o marcador, centraliza e abre o popup
+    markerClusterGroup.zoomToShowLayer(marker, () => {
+        map.setView(latLng, map.getZoom(), { animate: true });
+        marker.openPopup();
+    });
+}
+
+/**
+ * Limpa as camadas de dados existentes (marcadores e linhas) do mapa.
+ */
+function clearMapLayers() {
+    if (highlightMarker && map.hasLayer(highlightMarker)) {
+        map.removeLayer(highlightMarker);
+        highlightMarker = null;
+    }
     if (markerClusterGroup && map.hasLayer(markerClusterGroup)) {
         map.removeLayer(markerClusterGroup);
     }
     if (polylineFeatureGroup && map.hasLayer(polylineFeatureGroup)) {
         map.removeLayer(polylineFeatureGroup);
     }
-    
-    markerClusterGroup = null; 
+    markerClusterGroup = null;
     polylineFeatureGroup = null;
+    markersIndex = [];
+}
 
-    const selectedColumn = dataColumnSelect.value;
-    const needsConversion = selectedColumn.includes('°F');
-
-    // Cria uma cópia dos dados para não modificar o original. Converte se necessário.
-    const processedData = csvData.map(row => {
-        if (needsConversion && row.hasOwnProperty(selectedColumn) && typeof row[selectedColumn] === 'number') {
-            const newRow = { ...row };
-            const fahrenheit = newRow[selectedColumn];
-            newRow[selectedColumn] = (fahrenheit - 32) * 5 / 9; // Conversão F -> C
-            return newRow;
-        }
-        return row;
-    });
-
-    let validPointsData = [];
-    let bounds = [];
-
+/**
+ * Extrai pontos com coordenadas válidas do CSV e processa os dados selecionados.
+ * @param {string} selectedColumn - A coluna de dados selecionada para visualização.
+ * @param {boolean} needsConversion - Se os dados precisam de conversão (ex: F para C).
+ * @returns {object} - Um objeto contendo { validPoints, minValue, maxValue, hasNumericalData }.
+ */
+function extractAndProcessPoints(selectedColumn, needsConversion) {
+    const latKeys = ['latitude', 'lat'];
+    const lonKeys = ['longitude', 'lon', 'lng'];
     let minValue = Infinity;
     let maxValue = -Infinity;
-    let hasNumericalSelectedDataForPlot = false;
 
-    // Usa os dados processados (processedData) para encontrar pontos válidos e calcular min/max
-    processedData.forEach((row, index) => {
-        let latitude = null;
-        let longitude = null;
+    const validPoints = csvData.map(row => {
+        const newRow = { ...row };
+        let latitude = null, longitude = null;
 
-          let key =' Latitude';
-        if (row.hasOwnProperty(key) && typeof row[key] === 'number' && row[key] >= -90 && row[key] <= 90) {
-                latitude = row[key];
+        // Encontra coordenadas
+        for (const key in newRow) {
+            const keyLower = key.trim().toLowerCase();
+            if (latitude === null && latKeys.includes(keyLower) && typeof newRow[key] === 'number') latitude = newRow[key];
+            if (longitude === null && lonKeys.includes(keyLower) && typeof newRow[key] === 'number') longitude = newRow[key];
         }
-        key =' Longitude';
-        
-        if (row.hasOwnProperty(key) && typeof row[key] === 'number' && row[key] >= -180 && row[key] <= 180) {
-            longitude = row[key];
-        }
-       
-        if (latitude !== null && longitude !== null) {
-            validPointsData.push({
-                latLng: [latitude, longitude],
-                rowData: row // rowData agora contém o valor convertido, se aplicável
-            });
-            bounds.push([latitude, longitude]);
 
-            if (selectedColumn && row.hasOwnProperty(selectedColumn) && typeof row[selectedColumn] === 'number') {
-                const dataValue = row[selectedColumn];
-                minValue = Math.min(minValue, dataValue);
-                maxValue = Math.max(maxValue, dataValue);
-                hasNumericalSelectedDataForPlot = true;
+        if (latitude === null || longitude === null) return null;
+
+        // Processa o valor da coluna selecionada (incluindo conversão)
+        if (selectedColumn && newRow.hasOwnProperty(selectedColumn) && typeof newRow[selectedColumn] === 'number') {
+            if (needsConversion) {
+                newRow[selectedColumn] = (newRow[selectedColumn] - 32) * 5 / 9; // F -> C
             }
+            const value = newRow[selectedColumn];
+            minValue = Math.min(minValue, value);
+            maxValue = Math.max(maxValue, value);
         }
-    });
 
-    // 2. Atualiza as variáveis globais de estado da escala de cores
-    currentMinValue = minValue;
-    currentMaxValue = maxValue;
-    currentSelectedColumn = selectedColumn;
-    currentHasNumericalSelectedData = hasNumericalSelectedDataForPlot;
+        return { latLng: [latitude, longitude], rowData: newRow };
+    }).filter(p => p !== null); // Remove linhas sem coordenadas válidas
 
-    updateColorLegend(currentMinValue, currentMaxValue, needsConversion);
+    const hasNumericalData = isFinite(minValue) && isFinite(maxValue);
+    return { validPoints, minValue, maxValue, hasNumericalData };
+}
 
-    // 3. Re-inicializa o markerClusterGroup com a função de ícone personalizada
+/**
+ * Cria e retorna uma camada de marcadores agrupados (MarkerClusterGroup).
+ * @param {Array} validPoints - Array de pontos válidos para plotar.
+ * @param {string} selectedColumn - A coluna de dados selecionada.
+ * @param {boolean} hasNumericalData - Se há dados numéricos para colorir os marcadores.
+ * @returns {L.MarkerClusterGroup} - A camada de marcadores.
+ */
+function createMarkersLayer(validPoints, selectedColumn, hasNumericalData) {
+    markersIndex = []; // Reseta o índice de marcadores
+
     markerClusterGroup = L.markerClusterGroup({
         chunkedLoading: true,
         maxClusterRadius: 80,
         iconCreateFunction: function(cluster) {
             const childMarkers = cluster.getAllChildMarkers();
-            let sumValues = 0;
-            let countNumerical = 0;
+            let sum = 0, count = 0;
 
-            if (currentHasNumericalSelectedData && currentSelectedColumn) {
+            if (currentHasNumericalSelectedData && currentSelectedColumn) { // Usa estado global para callback
                 childMarkers.forEach(marker => {
-                    const data = marker.options.rowData; 
-                    if (data && data.hasOwnProperty(currentSelectedColumn) && typeof data[currentSelectedColumn] === 'number') {
-                        sumValues += data[currentSelectedColumn];
-                        countNumerical++;
+                    const value = marker.options.rowData[currentSelectedColumn];
+                    if (typeof value === 'number') {
+                        sum += value;
+                        count++;
                     }
                 });
             }
 
-            let avgValue = 0;
-            let displayHtml = '';
-            let clusterColor = 'rgba(100, 100, 100, 0.7)'; 
+            const displayValue = count > 0 ? (sum / count).toFixed(1) : cluster.getChildCount();
+            const color = count > 0 ? getColorForValue(sum / count, currentMinValue, currentMaxValue) : 'rgba(60, 150, 250, 0.7)';
+            const size = 30 + Math.min(cluster.getChildCount() / 100, 20);
 
-            if (countNumerical > 0) {
-                avgValue = sumValues / countNumerical;
-                displayHtml = avgValue.toFixed(1);
-                clusterColor = getColorForValue(avgValue, currentMinValue, currentMaxValue);
-            } else {
-                displayHtml = cluster.getChildCount();
-                clusterColor = 'rgba(60, 150, 250, 0.7)';
-            }
-            
-            let iconSize = 30 + Math.min(cluster.getChildCount() / validPointsData.length * 20, 30);
-            
             return L.divIcon({
-                html: `<span>${displayHtml}</span>`,
-                className: 'my-cluster-icon', 
-                iconSize: L.point(iconSize, iconSize),
-                style: `background-color: ${clusterColor};` 
+                html: `<span style="background-color:${color}">${displayValue}</span>`,
+                className: 'my-cluster-icon',
+                iconSize: L.point(size, size)
             });
         }
     });
-    markerClusterGroup.addTo(map);
 
-    // Inicializa o grupo de polylines
-    polylineFeatureGroup = L.featureGroup().addTo(map);
-
-    // 4. Desenhar Marcadores e Segmentos de Linha
-    validPointsData.forEach((pointData, index) => {
-        const latLng = pointData.latLng;
-        const row = pointData.rowData;
-
-        let popupContent = `<b>Coordenadas:</b> ${latLng[0].toFixed(4)}, ${latLng[1].toFixed(4)}<br>`;
+    validPoints.forEach(point => {
+        const { latLng, rowData } = point;
+        const value = rowData[selectedColumn];
+        let popupContent = `<b>Coords:</b> ${latLng[0].toFixed(4)}, ${latLng[1].toFixed(4)}<br>`;
         let markerColor = 'blue';
-        let markerRadius = 8;
 
-        const hasSelectedData = selectedColumn && row.hasOwnProperty(selectedColumn) && row[selectedColumn] !== undefined && row[selectedColumn] !== null;
-
-        if (hasSelectedData) {
-            const dataValue = row[selectedColumn]; // Pega o valor (convertido ou não) da linha atual
-            if (needsConversion) {
-                popupContent += `<b>${selectedColumn.replace('ºF', 'ºC')}:</b> ${dataValue.toFixed(2)}<br>`;
+        if (selectedColumn && rowData.hasOwnProperty(selectedColumn)) {
+            popupContent += `<b>${selectedColumn.replace('°F', '°C')}:</b> ${typeof value === 'number' ? value.toFixed(2) : value}<br>`;
+            if (hasNumericalData && typeof value === 'number') {
+                markerColor = getColorForValue(value, currentMinValue, currentMaxValue);
             } else {
-                popupContent += `<b>${selectedColumn}:</b> ${dataValue}<br>`;
+                markerColor = 'purple'; // Cor para dados não numéricos
             }
-
-            if (currentHasNumericalSelectedData && typeof dataValue === 'number') {
-                markerColor = getColorForValue(dataValue, currentMinValue, currentMaxValue); 
-                markerRadius = 5 + (((dataValue - currentMinValue) / (currentMaxValue - currentMinValue)) * 5); 
-            } else {
-                markerColor = 'purple';
-            }
-        } else {
-            popupContent += `<i>Nenhum dado para a coluna selecionada ou valor ausente.</i>`;
         }
 
-        const marker = L.circleMarker(latLng, {
-            color: markerColor,
-            radius: markerRadius,
-            rowData: row // Passa a linha com o dado já processado
-        }).bindPopup(popupContent);
+        const marker = L.circleMarker(latLng, { color: markerColor, radius: 6, rowData }).bindPopup(popupContent);
         markerClusterGroup.addLayer(marker);
-
-        if (index < validPointsData.length - 1) {
-            const nextLatLng = validPointsData[index + 1].latLng;
-            const segmentPoints = [latLng, nextLatLng];
-
-            let segmentColor = 'gray';
-            if (hasSelectedData && currentHasNumericalSelectedData) {
-                const dataValue = row[selectedColumn];
-                segmentColor = getColorForValue(dataValue, currentMinValue, currentMaxValue);
-            }
-
-            const polylineSegment = L.polyline(segmentPoints, {
-                color: segmentColor,
-                weight: 4,
-                opacity: 0.8,
-                lineCap: 'round',
-            });
-            polylineFeatureGroup.addLayer(polylineSegment);
-        }
+        markersIndex.push(marker); // Armazena referência indexada pela posição no validPoints
     });
 
-    // 5. Ajusta o zoom do mapa
-    if (validPointsData.length > 0 && map) {
-        map.fitBounds(bounds, { padding: [50, 50] }); 
-    } else if (map && csvData.length > 0) {
-         console.warn('Nenhum ponto válido com coordenadas encontradas no CSV para plotar.');
+    return markerClusterGroup;
+}
+
+/**
+ * Cria e retorna uma camada com a trajetória (Polyline) colorida pelos dados.
+ * @param {Array} validPoints - Array de pontos válidos para a trajetória.
+ * @returns {L.FeatureGroup} - A camada da trajetória.
+ */
+function createPathLayer(validPoints) {
+    const latLngs = validPoints.map(p => p.latLng);
+    const polyline = L.polyline(latLngs, { color: 'grey', weight: 3, opacity: 0.7 });
+    return L.featureGroup([polyline]);
+}
+
+// --- Função Principal de Plotagem (Reimplementada) ---
+function plotDataOnMap() {
+    clearMapLayers();
+
+    if (csvData.length === 0) {
+        updateDataChart(); // Limpa o gráfico se não houver dados
+        return;
     }
+
+    // 1. Obter estado da UI e processar os dados
+    const selectedColumn = mapDataColumnSelect.value;
+    const needsConversion = selectedColumn.includes('°F');
+    const { validPoints, minValue, maxValue, hasNumericalData } = extractAndProcessPoints(selectedColumn, needsConversion);
+
+    if (validPoints.length === 0) {
+        console.warn('Nenhum ponto com coordenadas válidas encontrado no arquivo CSV.');
+        updateDataChart(); // Limpa o gráfico se não houver pontos válidos
+        return;
+    }
+
+    // 2. Atualizar estado global para callbacks (legenda, clusters)
+    currentSelectedColumn = selectedColumn;
+    currentMinValue = minValue;
+    currentMaxValue = maxValue;
+    currentHasNumericalSelectedData = hasNumericalData;
+
+    // 3. Criar as camadas do mapa
+    const markersLayer = createMarkersLayer(validPoints, selectedColumn, hasNumericalData);
+    const pathLayer = createPathLayer(validPoints);
+    polylineFeatureGroup = pathLayer; // Atribui ao global para poder limpar depois
+
+    // 4. Adicionar camadas ao mapa e ajustar visualização
+    markersLayer.addTo(map);
+    pathLayer.addTo(map);
+    updateColorLegend(minValue, maxValue, needsConversion);
+    map.fitBounds(markersLayer.getBounds(), { padding: [50, 50] });
+
+    // 5. Atualizar o gráfico de linhas
+    updateDataChart();
 }
