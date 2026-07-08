@@ -18,8 +18,8 @@
         <label for="csvFile">Selecione o arquivo CSV:</label>
         <input type="file" id="csvFile" accept=".csv">
         <div id="columnSelector" style="display:none;">
-            <label for="dataColumn">Selecione o dado para plotar:</label>
-            <select id="dataColumn"></select>
+            <label for="mapDataColumn">Dado para Cor do Mapa:</label>
+            <select id="mapDataColumn"></select>
         </div>
         <div id="colorLegend" style="display:none;">
             <h4>Legenda da Cor da Linha/Pontos</h4>
@@ -30,6 +30,14 @@
     </div>
 
     <div id="map"></div>
+
+    <div class="footer">
+        <h2>Gráfico de Dados</h2>
+        <div class="chart-container">
+            <p id="chartMessage">Carregue um arquivo CSV para visualizar o gráfico de dados.</p>
+            <canvas id="dataChart"></canvas>
+        </div>
+    </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" ></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
