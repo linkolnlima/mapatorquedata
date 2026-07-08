@@ -178,6 +178,11 @@ function updateDataChart() {
 
             const color = `hsl(${(index * 60) % 360}, 70%, 50%)`;
 
+            // Visível apenas se for a coluna selecionada no combobox do mapa
+            const selectedColumn = mapDataColumnSelect.value;
+            const isSelected = header === selectedColumn ||
+                (needsConversion && header.replace('°F', '°C') === selectedColumn);
+
             return {
                 label: needsConversion ? header.replace('°F', '°C') : header,
                 data: data,
@@ -185,6 +190,7 @@ function updateDataChart() {
                 backgroundColor: color + '33', // Cor com transparência
                 fill: false,
                 tension: 0.1,
+                hidden: !isSelected,
                 pointRadius: data.length > 500 ? 0 : 3, // Sem pontos em datasets grandes
                 yAxisID: needsConversion ? 'y_temp' : 'y_default' // Associa ao eixo Y correto
             };
