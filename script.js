@@ -13,6 +13,12 @@ let currentHasNumericalSelectedData = false;
 // Variável global para a instância do Chart.js
 let dataChartInstance = null;
 
+// Array de marcadores indexados pela linha do CSV (para sincronização gráfico → mapa)
+let markersIndex = [];
+
+// Marcador de destaque temporário
+let highlightMarker = null;
+
 // Referências aos elementos do DOM para interatividade e legenda
 const csvFileInput = document.getElementById('csvFile');
 const mapDataColumnSelect = document.getElementById('mapDataColumn');
@@ -240,8 +246,55 @@ function updateDataChart() {
             plugins: {
                 title: { display: true, text: 'Visualização dos Indicadores' },
                 decimation: { enabled: true, algorithm: 'lttb', samples: 500, threshold: 1000 }
+            },
+            onClick: (event, elements) => {
+                if (!elements || elements.length === 0) return;
+                const dataIndex = elements[0].index;
+                highlightMapMarker(dataIndex);
             }
         }
+    });
+}
+
+/**
+ * Destaca no mapa o marcador correspondente ao índice clicado no gráfico.
+ * Expande o cluster se necessário, centraliza o mapa e abre o popup.
+ * @param {number} dataIndex - Índice do ponto clicado no gráfico (= linha do CSV).
+ */
+function highlightMapMarker(dataIndex) {
+    if (!markerClusterGroup || dataIndex < 0 || dataIndex >= markersIndex.length) return;
+
+    const marker = markersIndex[dataIndex];
+    if (!marker) return;
+
+    // Remove destaque anterior
+    if (highlightMarker && map.hasLayer(highlightMarker)) {
+        map.removeLayer(highlightMarker);
+        highlightMarker = null;
+    }
+
+    // Adiciona um círculo de destaque pulsante na posição do marcador
+    const latLng = marker.getLatLng();
+    highlightMarker = L.circleMarker(latLng, {
+        radius: 18,
+        color: '#ff4444',
+        weight: 3,
+        fillColor: '#ff4444',
+        fillOpacity: 0.25
+    }).addTo(map);
+
+    // Remove o destaque após 4 segundos
+    setTimeout(() => {
+        if (highlightMarker && map.hasLayer(highlightMarker)) {
+            map.removeLayer(highlightMarker);
+            highlightMarker = null;
+        }
+    }, 4000);
+
+    // Expande o cluster para revelar o marcador, centraliza e abre o popup
+    markerClusterGroup.zoomToShowLayer(marker, () => {
+        map.setView(latLng, map.getZoom(), { animate: true });
+        marker.openPopup();
     });
 }
 
@@ -249,6 +302,10 @@ function updateDataChart() {
  * Limpa as camadas de dados existentes (marcadores e linhas) do mapa.
  */
 function clearMapLayers() {
+    if (highlightMarker && map.hasLayer(highlightMarker)) {
+        map.removeLayer(highlightMarker);
+        highlightMarker = null;
+    }
     if (markerClusterGroup && map.hasLayer(markerClusterGroup)) {
         map.removeLayer(markerClusterGroup);
     }
@@ -257,6 +314,7 @@ function clearMapLayers() {
     }
     markerClusterGroup = null;
     polylineFeatureGroup = null;
+    markersIndex = [];
 }
 
 /**
@@ -309,6 +367,8 @@ function extractAndProcessPoints(selectedColumn, needsConversion) {
  * @returns {L.MarkerClusterGroup} - A camada de marcadores.
  */
 function createMarkersLayer(validPoints, selectedColumn, hasNumericalData) {
+    markersIndex = []; // Reseta o índice de marcadores
+
     markerClusterGroup = L.markerClusterGroup({
         chunkedLoading: true,
         maxClusterRadius: 80,
@@ -355,6 +415,7 @@ function createMarkersLayer(validPoints, selectedColumn, hasNumericalData) {
 
         const marker = L.circleMarker(latLng, { color: markerColor, radius: 6, rowData }).bindPopup(popupContent);
         markerClusterGroup.addLayer(marker);
+        markersIndex.push(marker); // Armazena referência indexada pela posição no validPoints
     });
 
     return markerClusterGroup;
