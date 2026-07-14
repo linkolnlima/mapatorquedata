@@ -47,9 +47,10 @@ function initMap() {
 }
 
 // --- Funções de Leitura e Processamento de Dados ---
-// ... (parseCSVFile, populateDataColumnSelector, csvFileInput.addEventListener, dataColumnSelect.addEventListener - permanecem iguais) ...
-csvFileInput.addEventListener('change', async (event) => {
-    const file = event.target.files[0];
+
+const uploadArea = document.getElementById('uploadArea');
+
+async function handleCSVFile(file) {
     if (!file) {
         console.warn('Nenhum arquivo selecionado.');
         return;
@@ -61,10 +62,33 @@ csvFileInput.addEventListener('change', async (event) => {
         console.log('Dados CSV carregados e processados:', csvData);
         populateDataColumnSelector(results.meta.fields);
         columnSelectorDiv.style.display = 'flex';
+        uploadArea.querySelector('.upload-text').textContent = file.name;
         plotDataOnMap();
     } catch (error) {
         console.error('Erro ao processar o arquivo CSV:', error);
         alert('Erro ao ler o arquivo CSV. Verifique o formato e o console para mais detalhes.');
+    }
+}
+
+csvFileInput.addEventListener('change', (event) => {
+    handleCSVFile(event.target.files[0]);
+});
+
+uploadArea.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    uploadArea.classList.add('drag-over');
+});
+
+uploadArea.addEventListener('dragleave', () => {
+    uploadArea.classList.remove('drag-over');
+});
+
+uploadArea.addEventListener('drop', (event) => {
+    event.preventDefault();
+    uploadArea.classList.remove('drag-over');
+    const file = event.dataTransfer.files[0];
+    if (file && file.name.endsWith('.csv')) {
+        handleCSVFile(file);
     }
 });
 
