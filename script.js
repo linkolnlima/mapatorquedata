@@ -31,8 +31,52 @@ const maxValLabel = document.getElementById('maxValLabel');
 const dataChartCanvas = document.getElementById('dataChart');
 const chartMessage = document.getElementById('chartMessage');
 
+let csvRawText = '';
+
+const STORAGE_KEY = 'mapatorquedata_state';
+
+function saveState() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            csvText: csvRawText,
+            selectedColumn: mapDataColumnSelect.value,
+        }));
+    } catch (e) {
+        console.warn('Não foi possível salvar o estado:', e.message);
+    }
+}
+
+function restoreState() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        if (!saved || !saved.csvText) return;
+
+        csvRawText = saved.csvText;
+        const blob = new Blob([csvRawText], { type: 'text/csv' });
+        const file = new File([blob], 'dados.csv');
+
+        parseCSVFile(file).then((results) => {
+            csvData = results.data;
+            populateDataColumnSelector(results.meta.fields);
+            columnSelectorDiv.style.display = 'flex';
+            uploadArea.querySelector('.upload-text').textContent = 'dados.csv (restaurado)';
+
+            if (saved.selectedColumn) {
+                mapDataColumnSelect.value = saved.selectedColumn;
+            }
+
+            plotDataOnMap();
+        });
+    } catch (e) {
+        console.warn('Não foi possível restaurar o estado:', e.message);
+    }
+}
+
 // Inicializa o mapa ao carregar a página
-document.addEventListener('DOMContentLoaded', initMap);
+document.addEventListener('DOMContentLoaded', () => {
+    initMap();
+    restoreState();
+});
 
 // Função de inicialização do mapa (sem alterações significativas aqui)
 function initMap() {
@@ -57,13 +101,15 @@ async function handleCSVFile(file) {
     }
 
     try {
-        const results = await parseCSVFile(file);
+        csvRawText = await file.text();
+        const results = parseCSVFileFromText(csvRawText);
         csvData = results.data;
         console.log('Dados CSV carregados e processados:', csvData);
         populateDataColumnSelector(results.meta.fields);
         columnSelectorDiv.style.display = 'flex';
         uploadArea.querySelector('.upload-text').textContent = file.name;
         plotDataOnMap();
+        saveState();
     } catch (error) {
         console.error('Erro ao processar o arquivo CSV:', error);
         alert('Erro ao ler o arquivo CSV. Verifique o formato e o console para mais detalhes.');
@@ -91,6 +137,14 @@ uploadArea.addEventListener('drop', (event) => {
         handleCSVFile(file);
     }
 });
+
+function parseCSVFileFromText(text) {
+    return Papa.parse(text, {
+        header: true,
+        dynamicTyping: true,
+        skipEmptyLines: true,
+    });
+}
 
 function parseCSVFile(file) {
     return new Promise((resolve, reject) => {
@@ -123,7 +177,10 @@ function populateDataColumnSelector(headers) {
     });
 }
 
-mapDataColumnSelect.addEventListener('change', plotDataOnMap);
+mapDataColumnSelect.addEventListener('change', () => {
+    plotDataOnMap();
+    saveState();
+});
 
 // --- Funções de Visualização no Mapa (sem alterações nas funções auxiliares) ---
 
