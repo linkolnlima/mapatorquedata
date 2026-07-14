@@ -17,6 +17,7 @@
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
     --transition: 0.2s ease;
+    --content-width: 85vw;
 }
 
 *,
@@ -375,6 +376,17 @@ canvas {
     #map {
         height: 600px;
         max-height: 70vh;
+    }
+
+    .container > .card {
+        width: var(--content-width);
+        margin-left: calc(50% - var(--content-width) / 2);
+        border-radius: 0;
+    }
+
+    .site-footer {
+        width: var(--content-width);
+        margin-left: calc(50% - var(--content-width) / 2);
     }
 
     .chart-container {
