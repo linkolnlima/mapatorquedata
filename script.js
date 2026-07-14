@@ -30,9 +30,54 @@ const maxValLabel = document.getElementById('maxValLabel');
 // Referências para o canvas e mensagem do gráfico
 const dataChartCanvas = document.getElementById('dataChart');
 const chartMessage = document.getElementById('chartMessage');
+const resetZoomBtn = document.getElementById('resetZoom');
+
+let csvRawText = '';
+
+const STORAGE_KEY = 'mapatorquedata_state';
+
+function saveState() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            csvText: csvRawText,
+            selectedColumn: mapDataColumnSelect.value,
+        }));
+    } catch (e) {
+        console.warn('Não foi possível salvar o estado:', e.message);
+    }
+}
+
+function restoreState() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        if (!saved || !saved.csvText) return;
+
+        csvRawText = saved.csvText;
+        const blob = new Blob([csvRawText], { type: 'text/csv' });
+        const file = new File([blob], 'dados.csv');
+
+        parseCSVFile(file).then((results) => {
+            csvData = results.data;
+            populateDataColumnSelector(results.meta.fields);
+            columnSelectorDiv.style.display = 'flex';
+            uploadArea.querySelector('.upload-text').textContent = 'dados.csv (restaurado)';
+
+            if (saved.selectedColumn) {
+                mapDataColumnSelect.value = saved.selectedColumn;
+            }
+
+            plotDataOnMap();
+        });
+    } catch (e) {
+        console.warn('Não foi possível restaurar o estado:', e.message);
+    }
+}
 
 // Inicializa o mapa ao carregar a página
-document.addEventListener('DOMContentLoaded', initMap);
+document.addEventListener('DOMContentLoaded', () => {
+    initMap();
+    restoreState();
+});
 
 // Função de inicialização do mapa (sem alterações significativas aqui)
 function initMap() {
@@ -47,26 +92,60 @@ function initMap() {
 }
 
 // --- Funções de Leitura e Processamento de Dados ---
-// ... (parseCSVFile, populateDataColumnSelector, csvFileInput.addEventListener, dataColumnSelect.addEventListener - permanecem iguais) ...
-csvFileInput.addEventListener('change', async (event) => {
-    const file = event.target.files[0];
+
+const uploadArea = document.getElementById('uploadArea');
+
+async function handleCSVFile(file) {
     if (!file) {
         console.warn('Nenhum arquivo selecionado.');
         return;
     }
 
     try {
-        const results = await parseCSVFile(file);
+        csvRawText = await file.text();
+        const results = parseCSVFileFromText(csvRawText);
         csvData = results.data;
         console.log('Dados CSV carregados e processados:', csvData);
         populateDataColumnSelector(results.meta.fields);
         columnSelectorDiv.style.display = 'flex';
+        uploadArea.querySelector('.upload-text').textContent = file.name;
         plotDataOnMap();
+        saveState();
     } catch (error) {
         console.error('Erro ao processar o arquivo CSV:', error);
         alert('Erro ao ler o arquivo CSV. Verifique o formato e o console para mais detalhes.');
     }
+}
+
+csvFileInput.addEventListener('change', (event) => {
+    handleCSVFile(event.target.files[0]);
 });
+
+uploadArea.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    uploadArea.classList.add('drag-over');
+});
+
+uploadArea.addEventListener('dragleave', () => {
+    uploadArea.classList.remove('drag-over');
+});
+
+uploadArea.addEventListener('drop', (event) => {
+    event.preventDefault();
+    uploadArea.classList.remove('drag-over');
+    const file = event.dataTransfer.files[0];
+    if (file && file.name.endsWith('.csv')) {
+        handleCSVFile(file);
+    }
+});
+
+function parseCSVFileFromText(text) {
+    return Papa.parse(text, {
+        header: true,
+        dynamicTyping: true,
+        skipEmptyLines: true,
+    });
+}
 
 function parseCSVFile(file) {
     return new Promise((resolve, reject) => {
@@ -99,7 +178,10 @@ function populateDataColumnSelector(headers) {
     });
 }
 
-mapDataColumnSelect.addEventListener('change', plotDataOnMap);
+mapDataColumnSelect.addEventListener('change', () => {
+    plotDataOnMap();
+    saveState();
+});
 
 // --- Funções de Visualização no Mapa (sem alterações nas funções auxiliares) ---
 
@@ -125,8 +207,13 @@ function updateColorLegend(minVal, maxVal, isConverted = false) {
     minValLabel.textContent = `Min: ${minVal.toFixed(2)}${unit}`;
     maxValLabel.textContent = `Max: ${maxVal.toFixed(2)}${unit}`;
 
-    const gradientCss = `linear-gradient(to right, ${getColorForValue(minVal, minVal, maxVal)}, ${getColorForValue(maxVal, minVal, maxVal)})`;
-    gradientBar.style.background = gradientCss;
+    const stops = [];
+    for (let i = 0; i <= 10; i++) {
+        const pct = (i * 10) + '%';
+        const val = minVal + (maxVal - minVal) * (i / 10);
+        stops.push(`${getColorForValue(val, minVal, maxVal)} ${pct}`);
+    }
+    gradientBar.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
 }
 
 // --- Funções para o Gráfico de Linhas ---
@@ -218,13 +305,13 @@ function updateDataChart() {
         y_default: { type: 'linear', position: 'left', title: { display: true, text: 'Valores' } }
     };
 
-    // Verifica se algum dataset usa o eixo de temperatura e o adiciona se necessário
-    const hasTempData = datasets.some(ds => ds.yAxisID === 'y_temp');
-    if (hasTempData) {
+    // Verifica se a coluna selecionada é de temperatura para mostrar eixo dedicado
+    const selectedIsTemp = mapDataColumnSelect.value.includes('°F');
+    if (selectedIsTemp) {
         scales.y_temp = { 
             type: 'linear', 
             position: 'right', 
-            title: { display: true, text: 'Temperatura (°C)' }, 
+            title: { display: true, text: mapDataColumnSelect.value.replace('°F', '°C') }, 
             grid: { drawOnChartArea: false } 
         };
     }
@@ -245,7 +332,36 @@ function updateDataChart() {
             scales: scales,
             plugins: {
                 title: { display: true, text: 'Visualização dos Indicadores' },
-                decimation: { enabled: true, algorithm: 'lttb', samples: 500, threshold: 1000 }
+                decimation: { enabled: true, algorithm: 'lttb', samples: 500, threshold: 1000 },
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'x',
+                    },
+                    zoom: {
+                        drag: {
+                            enabled: true,
+                            backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                            borderColor: 'rgba(37, 99, 235, 0.6)',
+                            borderWidth: 1,
+                        },
+                        mode: 'x',
+                        onZoomComplete: ({ chart }) => {
+                            resetZoomBtn.style.display = 'inline-block';
+                        },
+                        onZoomReset: ({ chart }) => {
+                            resetZoomBtn.style.display = 'none';
+                        },
+                    },
+                    limits: {
+                        x: { minRange: 5 },
+                    },
+                },
+                tooltip: {
+                    enabled: true,
+                    mode: 'index',
+                    intersect: false,
+                },
             },
             onClick: (event, elements) => {
                 if (!elements || elements.length === 0) return;

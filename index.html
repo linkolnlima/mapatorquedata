@@ -3,48 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Visualizador de CSV em Mapa (Com Gráfico)</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-     
-     crossorigin=""/>
+    <meta name="description" content="Visualize dados CSV em um mapa interativo com gráficos">
+    <title>MapaTorque - Visualizador CSV</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin=""/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin=""/>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Plote Seus Dados CSV em um Mapa (Com Gráfico de Dados)</h1>
+    <header class="header">
+        <h1>MapaTorque</h1>
+        <p class="subtitle">Visualize seus dados CSV em um mapa interativo com gráficos</p>
+    </header>
 
-    <div class="controls">
-        <label for="csvFile">Selecione o arquivo CSV:</label>
-        <input type="file" id="csvFile" accept=".csv">
-        <div id="columnSelector" style="display:none;">
-            <label for="mapDataColumn">Dado para Cor do Mapa:</label>
-            <select id="mapDataColumn"></select>
-        </div>
-        <div id="colorLegend" style="display:none;">
-            <h4>Legenda da Cor da Linha/Pontos</h4>
-            <div id="gradientBar"></div>
-            <span id="minValLabel">Min: </span>
-            <span id="maxValLabel" style="float:right;">Max: </span>
-        </div>
-    </div>
+    <main class="container">
+        <section class="card controls">
+            <div class="upload-area" id="uploadArea">
+                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <p class="upload-text">Arraste um arquivo CSV aqui ou clique para selecionar</p>
+                <input type="file" id="csvFile" accept=".csv" class="upload-input">
+            </div>
 
-    <div id="map"></div>
+            <div id="columnSelector" class="control-row" style="display:none;">
+                <label for="mapDataColumn">Dado para cor no mapa:</label>
+                <select id="mapDataColumn"></select>
+            </div>
 
-    <div class="footer">
-        <h2>Gráfico de Dados</h2>
-        <div class="chart-container">
-            <p id="chartMessage">Carregue um arquivo CSV para visualizar o gráfico de dados.</p>
-            <canvas id="dataChart"></canvas>
-        </div>
-    </div>
+            <div id="colorLegend" class="legend" style="display:none;">
+                <h4>Legenda da Cor</h4>
+                <div id="gradientBar" class="gradient-bar"></div>
+                <div class="legend-labels">
+                    <span id="minValLabel">Min: </span>
+                    <span id="maxValLabel">Max: </span>
+                </div>
+            </div>
+        </section>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" ></script>
+        <section class="card map-section">
+            <div id="map"></div>
+        </section>
+
+        <section class="card chart-section">
+            <div class="chart-header">
+                <h2>Gráfico de Dados</h2>
+                <button id="resetZoom" class="reset-zoom-btn" style="display:none;" onclick="dataChartInstance.resetZoom()">Redefinir zoom</button>
+            </div>
+            <div class="chart-container">
+                <p id="chartMessage" class="chart-message">Carregue um arquivo CSV para visualizar o gráfico.</p>
+                <canvas id="dataChart"></canvas>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <p>MapaTorque &copy; 2025 &mdash; Dados plotados com <a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a> e <a href="https://www.chartjs.org" target="_blank" rel="noopener">Chart.js</a></p>
+    </footer>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
     <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
-
     <script src="script.js"></script>
 </body>
 </html>
