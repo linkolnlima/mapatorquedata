@@ -275,6 +275,7 @@ body {
 
 #dataChart {
     cursor: pointer;
+    touch-action: none;
 }
 
 canvas {

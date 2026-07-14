@@ -345,6 +345,9 @@ function updateDataChart() {
                             borderColor: 'rgba(37, 99, 235, 0.6)',
                             borderWidth: 1,
                         },
+                        pinch: {
+                            enabled: true,
+                        },
                         mode: 'x',
                         onZoomComplete: ({ chart }) => {
                             resetZoomBtn.style.display = 'inline-block';
