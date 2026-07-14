@@ -30,6 +30,7 @@ const maxValLabel = document.getElementById('maxValLabel');
 // Referências para o canvas e mensagem do gráfico
 const dataChartCanvas = document.getElementById('dataChart');
 const chartMessage = document.getElementById('chartMessage');
+const resetZoomBtn = document.getElementById('resetZoom');
 
 let csvRawText = '';
 
@@ -206,8 +207,13 @@ function updateColorLegend(minVal, maxVal, isConverted = false) {
     minValLabel.textContent = `Min: ${minVal.toFixed(2)}${unit}`;
     maxValLabel.textContent = `Max: ${maxVal.toFixed(2)}${unit}`;
 
-    const gradientCss = `linear-gradient(to right, ${getColorForValue(minVal, minVal, maxVal)}, ${getColorForValue(maxVal, minVal, maxVal)})`;
-    gradientBar.style.background = gradientCss;
+    const stops = [];
+    for (let i = 0; i <= 10; i++) {
+        const pct = (i * 10) + '%';
+        const val = minVal + (maxVal - minVal) * (i / 10);
+        stops.push(`${getColorForValue(val, minVal, maxVal)} ${pct}`);
+    }
+    gradientBar.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
 }
 
 // --- Funções para o Gráfico de Linhas ---
@@ -299,13 +305,13 @@ function updateDataChart() {
         y_default: { type: 'linear', position: 'left', title: { display: true, text: 'Valores' } }
     };
 
-    // Verifica se algum dataset usa o eixo de temperatura e o adiciona se necessário
-    const hasTempData = datasets.some(ds => ds.yAxisID === 'y_temp');
-    if (hasTempData) {
+    // Verifica se a coluna selecionada é de temperatura para mostrar eixo dedicado
+    const selectedIsTemp = mapDataColumnSelect.value.includes('°F');
+    if (selectedIsTemp) {
         scales.y_temp = { 
             type: 'linear', 
             position: 'right', 
-            title: { display: true, text: 'Temperatura (°C)' }, 
+            title: { display: true, text: mapDataColumnSelect.value.replace('°F', '°C') }, 
             grid: { drawOnChartArea: false } 
         };
     }
@@ -326,7 +332,36 @@ function updateDataChart() {
             scales: scales,
             plugins: {
                 title: { display: true, text: 'Visualização dos Indicadores' },
-                decimation: { enabled: true, algorithm: 'lttb', samples: 500, threshold: 1000 }
+                decimation: { enabled: true, algorithm: 'lttb', samples: 500, threshold: 1000 },
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'x',
+                    },
+                    zoom: {
+                        drag: {
+                            enabled: true,
+                            backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                            borderColor: 'rgba(37, 99, 235, 0.6)',
+                            borderWidth: 1,
+                        },
+                        mode: 'x',
+                        onZoomComplete: ({ chart }) => {
+                            resetZoomBtn.style.display = 'inline-block';
+                        },
+                        onZoomReset: ({ chart }) => {
+                            resetZoomBtn.style.display = 'none';
+                        },
+                    },
+                    limits: {
+                        x: { minRange: 5 },
+                    },
+                },
+                tooltip: {
+                    enabled: true,
+                    mode: 'index',
+                    intersect: false,
+                },
             },
             onClick: (event, elements) => {
                 if (!elements || elements.length === 0) return;

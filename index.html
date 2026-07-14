@@ -51,7 +51,10 @@
         </section>
 
         <section class="card chart-section">
-            <h2>Gráfico de Dados</h2>
+            <div class="chart-header">
+                <h2>Gráfico de Dados</h2>
+                <button id="resetZoom" class="reset-zoom-btn" style="display:none;" onclick="dataChartInstance.resetZoom()">Redefinir zoom</button>
+            </div>
             <div class="chart-container">
                 <p id="chartMessage" class="chart-message">Carregue um arquivo CSV para visualizar o gráfico.</p>
                 <canvas id="dataChart"></canvas>
@@ -67,6 +70,8 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
     <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
     <script src="script.js"></script>
 </body>
