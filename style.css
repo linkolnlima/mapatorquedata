@@ -426,6 +426,45 @@ canvas {
     }
 }
 
+/* ---- Scroll to top ---- */
+
+.scroll-top-btn {
+    position: fixed;
+    bottom: 1.25rem;
+    right: 1.25rem;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: none;
+    background: var(--color-primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.25s, transform 0.25s, background var(--transition);
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.scroll-top-btn.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.scroll-top-btn:hover {
+    background: var(--color-primary-dark);
+}
+
+.scroll-top-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
 /* ---- Print ---- */
 
 @media print {
